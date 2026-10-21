@@ -1,0 +1,30 @@
+QO-100 DATV spectrum and waterfall
+Copyright 2026 Wizards SDR contributors
+
+Dependencies used by this firmware:
+
+  Espressif Systems (Shanghai) CO., LTD. — ESP32 Arduino core, ESP-IDF,
+    and the SDK Wi-Fi/PHY implementation. Apache License 2.0.
+    https://github.com/espressif/arduino-esp32
+    https://github.com/espressif/esp-idf
+
+  Bodmer — TFT_eSPI display driver. BSD-style license.
+    https://github.com/Bodmer/TFT_eSPI
+
+Receiver hardware research and I/Q conventions informed by:
+
+  ESPARGOS — ESP-SDR and ESP-WebSDR
+    https://github.com/ESPARGOS/esp-sdr
+    https://github.com/ESPARGOS/esp-web-sdr
+
+Touch protocol reference:
+
+  Paul Stoffregen � XPT2046_Touchscreen
+    https://github.com/PaulStoffregen/XPT2046_Touchscreen
+
+Hardware references:
+
+  rzeldent — esp32-smartdisplay (Classic CYD)
+    https://github.com/rzeldent/esp32-smartdisplay
+  JustCallMeKoko — ESP32Marauder (AWOK Marauder 6.1)
+    https://github.com/justcallmekoko/ESP32Marauder

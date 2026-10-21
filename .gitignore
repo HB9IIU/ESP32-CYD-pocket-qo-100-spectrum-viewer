@@ -1,0 +1,17 @@
+.pio/
+.vscode/
+__pycache__/
+*.pyc
+*.swp
+*~
+build/
+*.o
+*.elf
+*.bin
+!dist/*.bin
+*.map
+*.d
+*.exe
+*.log
+dist/*.log
+dist/wizards-*.bin
