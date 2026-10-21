@@ -79,7 +79,6 @@ It is not intended for:
 - `src/esp_sdr.cpp` / `src/esp_sdr.h` — receive path and low-level capture logic
 - `src/touch_input.cpp` / `src/touch_input.h` — touchscreen handling
 - `src/splash_image.h` — RGB565 image data for the boot splash
-- `docs/splash.png` — source artwork for the boot splash
 - `tests/` — DSP and touch-related test code
 - `scripts/spectrum_memory.ld` — linker script to protect the capture SRAM layout
 - `platformio.ini` — PlatformIO configuration for the CYD board
@@ -167,7 +166,8 @@ Use caution when testing antennas or RF paths. Do not connect a transmitter outp
 
 ## License
 
-This project is distributed under the Apache-2.0 license. See the included license files for details.
+This project is distributed under the Apache-2.0 license. See
+[LICENSE](docs/LICENSE) and [NOTICE](docs/NOTICE) for details.
 
 ## Acknowledgements
 
