@@ -51,6 +51,16 @@ screen. **Never connect a transmitter output directly to the CYD.** For a
 conducted-output measurement or reliable verification, use suitable RF
 attenuation and proper test equipment.
 
+### Demo
+
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=mdKnJO6jI3c">
+    <img src="https://img.youtube.com/vi/mdKnJO6jI3c/hqdefault.jpg" alt="Click to play the Pocket QO-100 Spectrum Viewer demo on YouTube">
+    <br>
+    Click to play the demo on YouTube
+  </a>
+</p>
+
 ## Hardware
 
 - ESP32 Classic CYD 2.8" display board (ESP32-2432S028R)
