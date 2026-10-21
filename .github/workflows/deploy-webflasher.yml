@@ -1,0 +1,71 @@
+name: Build and deploy web flasher
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/deploy-webflasher.yml"
+      - "partitions.csv"
+      - "platformio.ini"
+      - "scripts/**"
+      - "src/**"
+      - "webflasher/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install PlatformIO
+        run: python -m pip install platformio
+
+      - name: Build firmware
+        run: pio run -e cyd
+
+      - name: Assemble browser-flashable image
+        run: |
+          mkdir -p _site
+          cp webflasher/index.html _site/index.html
+          jq --arg version "${GITHUB_SHA::7}" '.version = $version' webflasher/manifest.json > _site/manifest.json
+          pio pkg exec -p tool-esptoolpy -- esptool.py --chip esp32 merge_bin \
+            -o _site/firmware.bin \
+            --flash_mode dio \
+            --flash_freq 40m \
+            --flash_size 4MB \
+            0x1000 .pio/build/cyd/bootloader.bin \
+            0x8000 .pio/build/cyd/partitions.bin \
+            0xe000 "$HOME/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin" \
+            0x10000 .pio/build/cyd/firmware.bin
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

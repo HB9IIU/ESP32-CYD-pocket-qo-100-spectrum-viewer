@@ -1,3 +1,5 @@
+> **[Flash Pocket QO-100 Spectrum Viewer in your browser](https://hb9iiu.github.io/ESP32-CYD-pocket-qo-100-spectrum-viewer/)** — for the Classic ESP32 CYD; Chrome or Edge required.
+
 # Pocket QO-100 Spectrum Viewer
 
 A standalone receive-only spectrum viewer for the Classic 2.8-inch ESP32 Cheap Yellow Display (CYD, ESP32-2432S028R). It listens to the local QO-100 DATV uplink band and displays a live spectrum trace plus waterfall on the built-in TFT screen.

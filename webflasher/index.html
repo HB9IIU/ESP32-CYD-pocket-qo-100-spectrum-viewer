@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#07141b">
+  <title>Pocket QO-100 Spectrum Viewer — Web Flasher</title>
+  <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: system-ui, sans-serif;
+      background: #07141b;
+      color: #e9f4f5;
+    }
+    body {
+      box-sizing: border-box;
+      display: grid;
+      min-height: 100vh;
+      margin: 0;
+      padding: 2rem 1rem;
+      place-items: center;
+    }
+    main {
+      width: min(100%, 38rem);
+      padding: clamp(1.5rem, 5vw, 3rem);
+      border: 1px solid #24434b;
+      border-radius: 1rem;
+      background: #0d2028;
+      box-shadow: 0 1rem 4rem #0006;
+    }
+    h1 { color: #aef28d; }
+    p, li { line-height: 1.6; }
+    esp-web-install-button { display: block; margin: 2rem 0; }
+    esp-web-install-button::part(button) {
+      padding: .9rem 1.4rem;
+      border: 0;
+      border-radius: .6rem;
+      background: #aef28d;
+      color: #07141b;
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    a { color: #7edfff; }
+    .note { color: #b7c9cc; font-size: .95rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Pocket QO-100 Spectrum Viewer</h1>
+    <p>Install the receive-only spectrum viewer on a <strong>Classic ESP32 CYD 2.8-inch (ESP32-2432S028R)</strong>.</p>
+    <esp-web-install-button manifest="./manifest.json"></esp-web-install-button>
+    <h2>Before you flash</h2>
+    <ul>
+      <li>Use a desktop version of Google Chrome or Microsoft Edge.</li>
+      <li>Connect the CYD to your computer with a USB data cable.</li>
+      <li>Close any serial monitor using the board's USB port.</li>
+      <li>When prompted, select the board's serial port and approve installation.</li>
+    </ul>
+    <p class="note">This firmware is for the original ESP32 CYD, not ESP32-S3 or other CYD variants. Flashing replaces the firmware currently on the device. The viewer is receive-only and does not connect to Wi-Fi.</p>
+    <p><a href="https://github.com/HB9IIU/ESP32-CYD-pocket-qo-100-spectrum-viewer">Private source repository</a> (GitHub access required).</p>
+  </main>
+</body>
+</html>
