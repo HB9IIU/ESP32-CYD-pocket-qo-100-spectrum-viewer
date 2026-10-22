@@ -7,7 +7,11 @@
 #include "esp_sdr.h"
 #include "spectrum.h"
 #include "touch_input.h"
+#ifdef CYD_4INCH
+#include "splash_image_4in.h"
+#else
 #include "splash_image.h"
+#endif
 
 // Fixed receiver gain index (clamped to the hardware maximum at start-up).
 constexpr uint8_t kReceiverGain = 30;
@@ -18,28 +22,37 @@ constexpr uint16_t BRIGHT = 0x07FF, ERROR = 0xF800;
 uint16_t rgb(uint8_t r, uint8_t g, uint8_t b) {
     return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
 }
-const uint16_t TRACE = rgb(170, 230, 120);
-const uint16_t FILL = rgb(45, 85, 35);
+const uint16_t TRACE_GREEN = rgb(170, 230, 120);
+const uint16_t FILL_GREEN = rgb(45, 85, 35);
+const uint16_t TRACE_AMBER = rgb(255, 190, 75);
+const uint16_t FILL_AMBER = rgb(105, 65, 18);
+const uint16_t TRACE_CYAN = rgb(110, 220, 255);
+const uint16_t FILL_CYAN = rgb(20, 65, 100);
 }
 
-// Title sits at y=0, status line right below it; the plot starts immediately after.
-constexpr int kTitleY = 0, kStatusY = 16, kPlotTop = 26, kPlotLeft = 6;
+// Branding, title, and status occupy the rows above the plot.
+constexpr int kTitleY = 11, kStatusY = 29, kPlotTop = 34, kPlotLeft = 6;
 // Vertical scale of the spectrum trace (dBFS). Narrower span = more vertical
 // resolution. These are the start-up values; the scale then follows the signal.
 constexpr int kPlotMaxDbfs = -10, kPlotMinDbfs = -90;
-constexpr int kFrequencyStripHeight = 12;
-// Ring capacity covers the full-screen waterfall; the shared layout uses fewer rows.
-constexpr int kWaterfallRowHeight = 2, kMaxWaterfallRows = 100, kNormalWaterfallRows = 42;
-constexpr int kBacklightChannel = 0, kBootPin = 0;
-// Spectrum trace style, cycled by tapping the plot, BOOT, or serial "mode N".
-enum TraceMode { kTraceDots, kTraceLine, kTraceFilled, kTraceGradient, kTraceModeCount };
-static const char* const kTraceModeNames[kTraceModeCount] = {"dots", "line", "filled", "gradient"};
+constexpr int kFrequencyStripHeight = 20;
+// Ring capacity covers the full-screen waterfall; combined layout uses 32 rows.
+constexpr int kWaterfallRowHeight = 2, kMaxWaterfallRows = 100, kNormalWaterfallRows = 32;
+constexpr int kBacklightChannel = 0;
+// Spectrum trace style, cycled by tapping the plot or serial "mode N".
+enum TraceMode {
+    kTraceLine, kTraceFilledGreen, kTraceFilledAmber, kTraceFilledCyan,
+    kTraceGradient, kTraceModeCount
+};
+static const char* const kTraceModeNames[kTraceModeCount] =
+    {"line", "filled-green", "filled-amber", "filled-cyan", "gradient"};
 // Waterfall colour palette, cycled by tapping the lower half of the screen.
 enum WaterfallStyle { kWfClassic, kWfThermal, kWfPhosphor, kWfGray, kWfRainbow, kWfStyleCount };
 static const char* const kWaterfallStyleNames[kWfStyleCount] =
     {"classic", "thermal", "phosphor", "gray", "rainbow"};
 static int waterfallStyle = kWfClassic;
-constexpr int kMaxPlotHeight = 320;
+constexpr int kMaxPlotHeight = 480;
+constexpr int kMaxScreenWidth = 480;
 // Gradient trace colour per plot row (index 0 = top row); built once in setup().
 static uint16_t rowGradient[kMaxPlotHeight];
 static int traceMode = kTraceLine;
@@ -57,6 +70,49 @@ static uint8_t waterfall[kMaxWaterfallRows][kSpectrumBins] = {};
 static int waterfallHead = 0;
 static uint8_t smooth[kSpectrumBins] = {};
 static bool smoothPrimed = false;
+static bool transmissionCenterValid = false;
+static int transmissionCenterKHz = (kBandLowKHz + kBandHighKHz) / 2;
+static int transmissionSymbolRateKsps = 0;
+static char drawnCenterLabel[48] = {};
+static uint32_t lastCenterDetectionMs = 0;
+
+constexpr int kCenterDetectMarginDb = 15;
+constexpr int kCenterMinBins = 3;
+constexpr int kCenterConfirmFrames = 3;
+constexpr uint32_t kCenterHoldMs = 3000;
+constexpr int kMeasuredBandwidthPerSymbolRatePercent = 105;
+
+static int normalizeSymbolRateKsps(int measuredKsps) {
+    static const int nominalRatesKsps[] = {125, 250, 333, 500, 666, 1000};
+    constexpr int nominalRateCount =
+        sizeof(nominalRatesKsps) / sizeof(nominalRatesKsps[0]);
+    int nearestRate = nominalRatesKsps[0];
+    int nearestDifference = abs(measuredKsps - nominalRatesKsps[0]);
+    for (int nominalRate : nominalRatesKsps) {
+        const int difference = abs(measuredKsps - nominalRate);
+        if (difference < nearestDifference) {
+            nearestRate = nominalRate;
+            nearestDifference = difference;
+        }
+    }
+    return measuredKsps >= nominalRatesKsps[0]
+            && measuredKsps <= nominalRatesKsps[nominalRateCount - 1]
+        ? nearestRate
+        : measuredKsps;
+}
+
+static void saveDisplayStyles() {
+    Preferences settings;
+    if (!settings.begin("shcfg", false)) {
+        Serial.println("[ui] ERROR: could not open display settings");
+        return;
+    }
+    const bool traceSaved = settings.putUChar("trace", (uint8_t)traceMode) == sizeof(uint8_t);
+    const bool waterfallSaved = settings.putUChar("wf", (uint8_t)waterfallStyle) == sizeof(uint8_t);
+    settings.end();
+    if (!traceSaved || !waterfallSaved)
+        Serial.println("[ui] ERROR: failed to save display styles");
+}
 
 static uint16_t waterfallColor(uint8_t value) {
     static const uint8_t palettes[kWfStyleCount][6][3] = {
@@ -202,28 +258,107 @@ static void updateAutoScale(const uint8_t* values, int lo, int hi) {
     else plotBottomDbfs = bottomTarget;
 }
 
+static void updateTransmissionCenter(const uint8_t* values, int lo, int hi) {
+    static int candidateKHz = 0, candidateHits = 0;
+    static int candidateSymbolRateKsps = 0;
+    const uint32_t now = millis();
+
+    const int floorCode = medianCode(values + lo, hi - lo + 1);
+    int threshold = floorCode + kCenterDetectMarginDb * 255 / 100;
+    if (threshold > 255) threshold = 255;
+
+    int bestStart = 0, bestLength = 0, runStart = -1;
+    for (int bin = lo; bin <= hi + 1; ++bin) {
+        const bool above = bin <= hi && values[bin] >= threshold;
+        if (above && runStart < 0) runStart = bin;
+        if (!above && runStart >= 0) {
+            const int length = bin - runStart;
+            if (length > bestLength) {
+                bestStart = runStart;
+                bestLength = length;
+            }
+            runStart = -1;
+        }
+    }
+
+    if (bestLength >= kCenterMinBins) {
+        const int midpointBinTimes2 = 2 * bestStart + bestLength - 1;
+        const int measuredKHz = kCaptureLowKHz
+            + (midpointBinTimes2 * kCaptureSpanKHz + kSpectrumBins)
+                / (2 * kSpectrumBins);
+        const int plateauEdge = bestLength / 5;
+        const int plateauStart = bestStart + plateauEdge;
+        const int plateauLength = bestLength - 2 * plateauEdge;
+        const int plateauCode = medianCode(values + plateauStart, plateauLength);
+        const int srThreshold = floorCode
+            + ((plateauCode - floorCode) * 90 + 50) / 100;
+        const int plateauBin = plateauStart + plateauLength / 2;
+        int widthStart = plateauBin, widthEnd = plateauBin;
+        while (widthStart > lo && values[widthStart - 1] >= srThreshold) --widthStart;
+        while (widthEnd < hi && values[widthEnd + 1] >= srThreshold) ++widthEnd;
+        const int bandwidthBins = widthEnd - widthStart + 1;
+        const int bandwidthKHz =
+            (bandwidthBins * kCaptureSpanKHz + kSpectrumBins / 2) / kSpectrumBins;
+        const int measuredSymbolRateKsps =
+            (bandwidthKHz * 100 + kMeasuredBandwidthPerSymbolRatePercent / 2)
+                / kMeasuredBandwidthPerSymbolRatePercent;
+        const int maxStableStepKHz = 4 * kCaptureSpanKHz / kSpectrumBins;
+        if (!candidateHits || abs(measuredKHz - candidateKHz) > maxStableStepKHz) {
+            candidateKHz = measuredKHz;
+            candidateSymbolRateKsps = measuredSymbolRateKsps;
+            candidateHits = 1;
+        } else {
+            candidateKHz += (measuredKHz - candidateKHz) / 4;
+            candidateSymbolRateKsps += (measuredSymbolRateKsps - candidateSymbolRateKsps) / 4;
+            if (candidateHits < kCenterConfirmFrames) ++candidateHits;
+        }
+        lastCenterDetectionMs = now;
+        if (candidateHits >= kCenterConfirmFrames) {
+            transmissionCenterKHz = transmissionCenterValid
+                ? transmissionCenterKHz + (candidateKHz - transmissionCenterKHz) / 4
+                : candidateKHz;
+            transmissionSymbolRateKsps = normalizeSymbolRateKsps(candidateSymbolRateKsps);
+            transmissionCenterValid = true;
+        }
+    } else {
+        candidateHits = 0;
+        if (transmissionCenterValid && now - lastCenterDetectionMs >= kCenterHoldMs)
+            transmissionCenterValid = false;
+    }
+}
+
 // Draw once: this strip is outside the trace and waterfall repaint regions.
-static void drawFrequencyLabels() {
-    const int right = tft.width() - 6, width = right - kPlotLeft;
-    const int baseline = waterfallTop - 5;
+static void drawTransmissionCenterLabel() {
+    char centerLabel[24], rateLabel[24], label[48];
+    if (transmissionCenterValid)
+        snprintf(centerLabel, sizeof(centerLabel), "CF = %d.%03d MHz",
+                 transmissionCenterKHz / 1000, transmissionCenterKHz % 1000);
+    else
+        snprintf(centerLabel, sizeof(centerLabel), "CF = --- MHz");
+    if (transmissionCenterValid)
+        snprintf(rateLabel, sizeof(rateLabel), "SR est. %d ksps", transmissionSymbolRateKsps);
+    else
+        snprintf(rateLabel, sizeof(rateLabel), "SR = --- ksps");
+    snprintf(label, sizeof(label), "%s|%s", centerLabel, rateLabel);
+    if (!strcmp(label, drawnCenterLabel)) return;
+
+    constexpr int margin = 8;
+    constexpr int gap = 8;
+    const int left = margin;
+    const int right = tft.width() - margin;
+    const int textFont = tft.textWidth(centerLabel, 2)
+            + tft.textWidth(rateLabel, 2) + gap <= right - left
+        ? 2
+        : 1;
+    const int stripTop = waterfallTop - kFrequencyStripHeight - 4;
+    tft.fillRect(0, stripTop, tft.width(), kFrequencyStripHeight, color::BG);
     tft.setTextColor(color::BRIGHT, color::BG);
-    tft.setTextDatum(BL_DATUM);
-    tft.drawString("2401.0", kPlotLeft + 2, baseline, 1);
-    tft.setTextDatum(BC_DATUM);
-    tft.drawString("2405.5 MHz", kPlotLeft + width / 2, baseline, 1);
-    tft.setTextDatum(BR_DATUM);
-    tft.drawString("2410.0", right - 2, baseline, 1);
-}
-
-// Tick boxes in the top corners: left = full spectrum, right = full waterfall.
-static void drawCheckbox(int x, bool ticked) {
-    tft.drawRect(x, 1, 14, 14, color::MID);
-    tft.fillRect(x + 2, 3, 10, 10, ticked ? color::MID : color::BG);
-}
-
-static void drawCheckboxes() {
-    drawCheckbox(2, screenLayout == kLayoutSpectrum);
-    drawCheckbox(tft.width() - 16, screenLayout == kLayoutWaterfall);
+    const int textY = stripTop + (kFrequencyStripHeight - (textFont == 2 ? 16 : 8)) / 2;
+    tft.setTextDatum(TL_DATUM);
+    tft.drawString(centerLabel, left, textY, textFont);
+    tft.setTextDatum(TR_DATUM);
+    tft.drawString(rateLabel, right, textY, textFont);
+    snprintf(drawnCenterLabel, sizeof(drawnCenterLabel), "%s", label);
 }
 
 // Lays out the screen for the current mode and redraws the static elements.
@@ -246,16 +381,13 @@ static void applyLayout() {
         waterfallTop = kPlotTop + plotHeight + kFrequencyStripHeight + 4;
     }
     buildRowGradient();
+    drawnCenterLabel[0] = '\0';
     tft.fillRect(0, kPlotTop, tft.width(), tft.height() - kPlotTop, color::BG);
     tft.drawFastHLine(kPlotLeft, kPlotTop + plotHeight,
                       tft.width() - kPlotLeft - 6, color::DIM);
-    drawFrequencyLabels();
     if (waterfallRows > 0)
         tft.drawRect(5, waterfallTop - 1, tft.width() - 10,
                      waterfallRows * kWaterfallRowHeight + 2, color::DIM);
-    tft.fillRect(0, 0, 18, kStatusY - 1, color::BG);
-    tft.fillRect(tft.width() - 18, 0, 18, kStatusY - 1, color::BG);
-    drawCheckboxes();
 }
 
 static void drawSpectrumTrace(int width, int right) {
@@ -275,12 +407,22 @@ static void drawSpectrumTrace(int width, int right) {
             tft.pushColors(rowGradient + (y - kPlotTop), kPlotTop + plotHeight - y);
             tft.endWrite();
         } else {
-            if (traceMode == kTraceFilled)
-                tft.drawFastVLine(x, y, kPlotTop + plotHeight - y, color::FILL);
+            uint16_t traceColor = color::TRACE_GREEN;
+            uint16_t fillColor = color::FILL_GREEN;
+            if (traceMode == kTraceFilledAmber) {
+                traceColor = color::TRACE_AMBER;
+                fillColor = color::FILL_AMBER;
+            } else if (traceMode == kTraceFilledCyan) {
+                traceColor = color::TRACE_CYAN;
+                fillColor = color::FILL_CYAN;
+            }
+            if (traceMode == kTraceFilledGreen || traceMode == kTraceFilledAmber
+                || traceMode == kTraceFilledCyan)
+                tft.drawFastVLine(x, y, kPlotTop + plotHeight - y, fillColor);
             // Each segment only touches columns x-1 and x, so the per-column
             // clear above never erases it.
-            if (traceMode != kTraceDots && pixel > 0) tft.drawLine(x - 1, prevY, x, y, color::TRACE);
-            else tft.drawPixel(x, y, color::TRACE);
+            if (pixel > 0) tft.drawLine(x - 1, prevY, x, y, traceColor);
+            else tft.drawPixel(x, y, traceColor);
         }
         prevY = y;
     }
@@ -307,12 +449,12 @@ static void drawFrame(const SpectrumFrame& frame) {
     char status[64];
     if (!frame.valid) snprintf(status, sizeof(status), "%s", frame.error);
     else if (frame.clipped) snprintf(status, sizeof(status), "CLIPPING (gain %u)", frame.gain);
-    else snprintf(status, sizeof(status), "31.25 kHz/bin");
+    else snprintf(status, sizeof(status), "%d bins | 31.25 kHz spacing", kSpectrumBins);
     static char lastStatus[64] = {};
     static uint16_t lastStatusColor = 0;
     const uint16_t statusColor = frame.valid && !frame.clipped ? color::MID : color::ERROR;
     if (strcmp(status, lastStatus) || statusColor != lastStatusColor) {
-        tft.fillRect(0, kStatusY, tft.width(), 9, color::BG);
+        tft.fillRect(0, kStatusY - 5, tft.width(), kPlotTop - kStatusY + 5, color::BG);
         tft.setTextDatum(TC_DATUM);
         tft.setTextColor(statusColor, color::BG);
         tft.drawString(status, tft.width() / 2, kStatusY, 1);
@@ -326,11 +468,19 @@ static void drawFrame(const SpectrumFrame& frame) {
     if (frame.valid)
         updateAutoScale(smooth, spectrumBinForPixel(0, width),
                         spectrumBinForPixel(width - 1, width));
+    if (frame.valid)
+        updateTransmissionCenter(smooth, spectrumBinForPixel(0, width),
+                                 spectrumBinForPixel(width - 1, width));
+    else if (transmissionCenterValid
+             && millis() - lastCenterDetectionMs >= kCenterHoldMs) {
+        transmissionCenterValid = false;
+    }
+    drawTransmissionCenterLabel();
     if (plotHeight > 0) drawSpectrumTrace(width, right);
 
     memcpy(waterfall[waterfallHead], frame.bins, sizeof(frame.bins));
     waterfallHead = (waterfallHead + 1) % kMaxWaterfallRows;
-    static uint16_t line[320];
+    static uint16_t line[kMaxScreenWidth];
     for (int row = 0; row < waterfallRows; ++row) {
         // Head points to the next write slot; newest row is just before it.
         const int ring = (waterfallHead - 1 - row + kMaxWaterfallRows) % kMaxWaterfallRows;
@@ -398,11 +548,13 @@ static void receiverTask(void*) {
 
 static void cycleTraceMode() {
     traceMode = (traceMode + 1) % kTraceModeCount;
+    saveDisplayStyles();
     Serial.printf("[ui] trace mode: %s\n", kTraceModeNames[traceMode]);
 }
 
 static void cycleWaterfallStyle() {
     waterfallStyle = (waterfallStyle + 1) % kWfStyleCount;
+    saveDisplayStyles();
     Serial.printf("[ui] waterfall style: %s\n", kWaterfallStyleNames[waterfallStyle]);
 }
 
@@ -420,20 +572,15 @@ static void singleTapAction(int y) {
     else cycleTraceMode();
 }
 
-// Left tick box = full spectrum, right tick box = full waterfall (tick again to
-// go back). A double tap anywhere also toggles between both parts and full
-// spectrum. A single tap waits briefly (to rule out a double tap), then changes
-// the style of the part it hit. BOOT: short press = tap on the spectrum, hold =
-// waterfall palette.
+// A double tap toggles combined/full-spectrum layout; a single tap changes the
+// style of the part it hits.
 constexpr uint32_t kDoubleTapMs = 350;
-// Generous: the resistive panel is least accurate near the screen edges.
-constexpr int kCheckboxHitWidth = 100;
 // Contact counts as continuous across short pressure dropouts of the panel.
 constexpr uint32_t kReleaseHoldMs = 100;
 
 static void handleModeInput() {
-    static bool wasTouched = false, wasBoot = false, pending = false;
-    static uint32_t lastPoll = 0, lastDown = 0, lastContact = 0, bootDownMs = 0, pendingMs = 0;
+    static bool wasTouched = false, pending = false;
+    static uint32_t lastPoll = 0, lastDown = 0, lastContact = 0, pendingMs = 0;
     static int pendingY = 0;
     const uint32_t now = millis();
     if (pending && (uint32_t)(now - pendingMs) >= kDoubleTapMs) {
@@ -446,34 +593,12 @@ static void handleModeInput() {
     int x = 0, y = 0;
     if (touchRead(x, y)) lastContact = now;
     const bool touched = (uint32_t)(now - lastContact) < kReleaseHoldMs;
-    const bool boot = digitalRead(kBootPin) == LOW;
     bool tap = false;
     int tapY = 0;
     if (touched && !wasTouched && (uint32_t)(now - lastDown) > 80) {
         lastDown = now;
-        if (y < kPlotTop)
-            Serial.printf("[ui] top-strip touch x=%d y=%d (left<%d, right>=%d)\n", x, y,
-                          kCheckboxHitWidth, tft.width() - kCheckboxHitWidth);
-        if (y < kPlotTop && x < kCheckboxHitWidth) {
-            pending = false;
-            setLayout(screenLayout == kLayoutSpectrum ? kLayoutBoth : kLayoutSpectrum);
-        } else if (y < kPlotTop && x >= tft.width() - kCheckboxHitWidth) {
-            pending = false;
-            setLayout(screenLayout == kLayoutWaterfall ? kLayoutBoth : kLayoutWaterfall);
-        } else if (y >= kPlotTop) {
-            tap = true;
-            tapY = y;
-        }
-    }
-    if (boot && !wasBoot) bootDownMs = now;
-    if (!boot && wasBoot) {
-        if ((uint32_t)(now - bootDownMs) > 600 && screenLayout != kLayoutSpectrum) {
-            pending = false;
-            cycleWaterfallStyle();
-        } else {
-            tap = true;
-            tapY = kPlotTop;
-        }
+        tap = y >= kPlotTop;
+        tapY = y;
     }
     if (tap) {
         if (pending && (uint32_t)(now - pendingMs) < kDoubleTapMs) {
@@ -486,7 +611,6 @@ static void handleModeInput() {
         }
     }
     wasTouched = touched;
-    wasBoot = boot;
 }
 
 static void handleSerial() {
@@ -507,6 +631,7 @@ static void handleSerial() {
                 if (!strncmp(line, "mode ", 5) && line[5] >= '0' && line[5] < '0' + kTraceModeCount
                     && line[6] == '\0') {
                     traceMode = line[5] - '0';
+                    saveDisplayStyles();
                     Serial.printf("[ui] trace mode: %s\n", kTraceModeNames[traceMode]);
                     used = 0;
                     continue;
@@ -514,6 +639,7 @@ static void handleSerial() {
                 if (!strncmp(line, "wf ", 3) && line[3] >= '0' && line[3] < '0' + kWfStyleCount
                     && line[4] == '\0') {
                     waterfallStyle = line[3] - '0';
+                    saveDisplayStyles();
                     Serial.printf("[ui] waterfall style: %s\n", kWaterfallStyleNames[waterfallStyle]);
                     used = 0;
                     continue;
@@ -524,7 +650,7 @@ static void handleSerial() {
                     used = 0;
                     continue;
                 }
-                Serial.println("Commands: burst 0|1 | layout 0-2 (both|spectrum|waterfall) | mode 0-3 (dots|line|filled|gradient) | "
+                Serial.println("Commands: burst 0|1 | layout 0-2 (both|spectrum|waterfall) | mode 0-4 (line|filled-green|filled-amber|filled-cyan|gradient) | "
                                "wf 0-4 (classic|thermal|phosphor|gray|rainbow) | help");
             }
             used = 0; overflow = false;
@@ -538,15 +664,26 @@ void setup() {
     delay(200);
     Serial.println("\n[rx] QO-100 DATV spectrum/waterfall");
     uint8_t rotation = 1, brightness = 255;
+#ifdef CYD_4INCH
+    rotation = 3;
+#endif
     Preferences settings;
     if (settings.begin("shcfg", true)) {
-        rotation = settings.getUChar("rot", 1);
+        rotation = settings.getUChar("rot", rotation);
         brightness = settings.getUChar("bright", 255);
+        const uint8_t savedTraceMode = settings.getUChar("trace", kTraceLine);
+        const uint8_t savedWaterfallStyle = settings.getUChar("wf", kWfClassic);
+        if (savedTraceMode < kTraceModeCount) traceMode = savedTraceMode;
+        if (savedWaterfallStyle < kWfStyleCount) waterfallStyle = savedWaterfallStyle;
         settings.end();
     }
     if (rotation > 3) rotation = 1;
     tft.init();
+#ifdef CYD_4INCH
+    tft.setRotation(rotation);
+#else
     tft.setRotation(1);
+#endif
     // Inverted colours? Change TFT_INVERSION_ON/OFF in platformio.ini.
 #ifdef TFT_INVERSION_ON
     tft.invertDisplay(true);
@@ -557,16 +694,27 @@ void setup() {
     ledcAttachPin(TFT_BL, kBacklightChannel);
     ledcWrite(kBacklightChannel, brightness);
     tft.setSwapBytes(true);
-    tft.pushImage(0, 0, kSplashWidth, kSplashHeight, kSplashImage);
+    tft.pushImage((tft.width() - kSplashWidth) / 2,
+                  (tft.height() - kSplashHeight) / 2,
+                  kSplashWidth, kSplashHeight, kSplashImage);
     tft.setSwapBytes(false);
     delay(5000);
     tft.setRotation(rotation);
-    pinMode(kBootPin, INPUT_PULLUP);
-    touchBegin(rotation, tft.width(), tft.height());
+    rotation = touchBegin(tft, rotation, tft.width(), tft.height());
+    tft.setRotation(rotation);
     tft.fillScreen(color::BG);
+    const char* const title = "QO-100 Uplink Spectrum Viewer";
+    const int titleFont = tft.textWidth(title, 2) <= tft.width() - 8 ? 2 : 1;
+    tft.setTextDatum(TL_DATUM);
+    tft.setTextColor(color::MID, color::BG);
+    char versionLabel[24];
+    snprintf(versionLabel, sizeof(versionLabel), "Ver. %s", APP_VERSION);
+    tft.drawString(versionLabel, 4, 0, 1);
+    tft.setTextDatum(TR_DATUM);
+    tft.drawString("by HB9IIU", tft.width() - 4, 0, 1);
     tft.setTextDatum(TC_DATUM);
     tft.setTextColor(color::BRIGHT, color::BG);
-    tft.drawString("QO-100 DATV uplink", tft.width() / 2, kTitleY, 2);
+    tft.drawString(title, tft.width() / 2, kTitleY, titleFont);
     tft.setTextColor(color::MID, color::BG);
     tft.drawString("RX starting", tft.width() / 2, kStatusY, 1);
     applyLayout();

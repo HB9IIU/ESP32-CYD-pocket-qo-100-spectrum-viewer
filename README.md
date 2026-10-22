@@ -1,4 +1,4 @@
-> **[Flash Pocket QO-100 Spectrum Viewer in your browser](https://hb9iiu.github.io/ESP32-CYD-pocket-qo-100-spectrum-viewer/)** — for the Classic ESP32 CYD; Chrome or Edge required.
+> **[Flash Pocket QO-100 Spectrum Viewer in your browser](https://hb9iiu.github.io/ESP32-CYD-pocket-qo-100-spectrum-viewer/)** — choose the 2.8-inch or 4-inch Classic ESP32 CYD installer; Chrome or Edge required.
 
 # Pocket QO-100 Spectrum Viewer
 
@@ -51,19 +51,28 @@ screen. **Never connect a transmitter output directly to the CYD.** For a
 conducted-output measurement or reliable verification, use suitable RF
 attenuation and proper test equipment.
 
-### Demo
+### Demo videos
 
 <p align="center">
   <a href="https://www.youtube.com/watch?v=mdKnJO6jI3c">
-    <img src="https://img.youtube.com/vi/mdKnJO6jI3c/hqdefault.jpg" alt="Click to play the Pocket QO-100 Spectrum Viewer demo on YouTube">
+    <img src="https://img.youtube.com/vi/mdKnJO6jI3c/hqdefault.jpg" alt="Click to play the Pocket QO-100 Spectrum Viewer 2.8-inch demo on YouTube">
     <br>
-    Click to play the demo on YouTube
+    2.8-inch CYD demo
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=ukZ9wWU7DZ0">
+    <img src="https://img.youtube.com/vi/ukZ9wWU7DZ0/hqdefault.jpg" alt="Click to play the Pocket QO-100 Spectrum Viewer 4-inch demo on YouTube">
+    <br>
+    4-inch CYD demo
   </a>
 </p>
 
 ## Hardware
 
-- ESP32 Classic CYD 2.8" display board (ESP32-2432S028R)
+- ESP32 Classic CYD 2.8" display board (ESP32-2432S028R), 320×240 in landscape
+- ESP32 CYD 4" integrated display board with ST7796 TFT, 480×320 in landscape
 - Built-in TFT display and resistive touchscreen
 - ESP32 Wi-Fi radio used as the receive path for local RF capture
 
@@ -106,16 +115,27 @@ It is not intended for:
 ### Build
 
 ```bash
-pio run -j 2
+pio run -e CYD28Inch -j 2
+pio run -e CYD40Inch -j 2
 ```
+
+`CYD28Inch` is the default PlatformIO environment. Select `CYD40Inch` for the
+4-inch ST7796 model; the firmware and controls are shared, with the display
+driver, resolution, and backlight pin configured per profile. The 4-inch
+profile enables the ST7796 driver with `ST7796_DRIVER=1` in `platformio.ini`.
+The small corner version label is set by `APP_VERSION` in `platformio.ini`.
+On first boot, the 4-inch profile asks whether the screen orientation is
+upside-down and then calibrates the touchscreen. Calibration and orientation
+are saved in NVS and reused on later boots.
 
 ### Upload
 
 ```bash
-pio run -t upload --upload-port COM34 -j 2
+pio run -e CYD28Inch -t upload --upload-port COM34 -j 2
 ```
 
 On Windows, replace `COM34` with the port assigned to your board. On Linux/macOS, use the corresponding serial device path.
+For the 4-inch model, replace `CYD28Inch` with `CYD40Inch`.
 
 ### Monitor serial output
 
@@ -125,12 +145,9 @@ pio device monitor --port COM34 --baud 115200
 
 ## Touch and UI controls
 
-- Tap the spectrum area to cycle trace rendering style
-- Tap the waterfall area to cycle color palette
-- Use the top-left checkbox to switch to full-spectrum mode
-- Use the top-right checkbox to switch to full-waterfall mode
-- Double-tap or tap gestures can toggle layout quickly
-- BOOT button behavior is also implemented for alternate control shortcuts
+- **Both CYD sizes:** Tap the spectrum area to cycle trace style; tap the waterfall area to cycle its color palette. Double-tap within either area to toggle between the combined view and full-spectrum view. There are no corner checkbox shortcuts.
+- Trace style and waterfall palette selections are saved in Preferences and restored after reboot.
+- The center strip shows `CF` to three decimal places and an estimated `SR` in ksps on one line for a detected single DATV transmission. Detection requires at least three contiguous bins about 15 dB above the median floor and confirmation across three frames. For SR, the firmware finds the median plateau level in the middle of the detected band, then measures its width where the spectrum falls to 90% of the plateau-to-noise-floor range. The measured width is converted using an empirical factor of 1.05, based on observed TX rates of 250, 333, 500, and 1000 ksps. Estimates from 125 to 1000 ksps are normalized to the nearest nominal rate (125, 250, 333, 500, 666, or 1000 ksps), so estimates around 980 ksps display as 1000 ksps. Both values are indicative estimates limited by the 31.25 kHz FFT-bin spacing and should be checked against known TX rates.
 
 ## Serial commands
 
@@ -138,7 +155,7 @@ The firmware listens on serial at 115200 baud and supports commands such as:
 
 ```text
 layout 0|1|2
-mode 0-3
+mode 0-4
 wf 0-4
 burst 0|1
 help
@@ -149,7 +166,7 @@ Meaning:
 - `layout 0` = both spectrum + waterfall
 - `layout 1` = full-spectrum mode
 - `layout 2` = full-waterfall mode
-- `mode 0-3` = dots / line / filled / gradient
+- `mode 0-4` = line / filled-green / filled-amber / filled-cyan / gradient
 - `wf 0-4` = classic / thermal / phosphor / gray / rainbow
 - `burst 0|1` = disable or enable burst suppression
 

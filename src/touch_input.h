@@ -1,7 +1,9 @@
 #pragma once
 #include <stdint.h>
 
-void touchBegin(uint8_t rotation, int width, int height);
+class TFT_eSPI;
+
+uint8_t touchBegin(TFT_eSPI& display, uint8_t rotation, int width, int height);
 bool touchRead(int& x, int& y);
 
 // Relative gestures need no tap targets or precise pixel calibration.

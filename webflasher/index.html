@@ -49,8 +49,11 @@
 <body>
   <main>
     <h1>Pocket QO-100 Spectrum Viewer</h1>
-    <p>Install the receive-only spectrum viewer on a <strong>Classic ESP32 CYD 2.8-inch (ESP32-2432S028R)</strong>.</p>
-    <esp-web-install-button manifest="./manifest.json"></esp-web-install-button>
+    <p>Choose the installer that matches your display. The firmware is receive-only and does not connect to Wi-Fi.</p>
+    <h2>Classic CYD 2.8-inch (ESP32-2432S028R)</h2>
+    <esp-web-install-button manifest="./manifest-28.json"></esp-web-install-button>
+    <h2>CYD 4-inch (ST7796)</h2>
+    <esp-web-install-button manifest="./manifest-40.json"></esp-web-install-button>
     <h2>Before you flash</h2>
     <ul>
       <li>Use a desktop version of Google Chrome or Microsoft Edge.</li>
@@ -58,7 +61,7 @@
       <li>Close any serial monitor using the board's USB port.</li>
       <li>When prompted, select the board's serial port and approve installation.</li>
     </ul>
-    <p class="note">This firmware is for the original ESP32 CYD, not ESP32-S3 or other CYD variants. Flashing replaces the firmware currently on the device. The viewer is receive-only and does not connect to Wi-Fi.</p>
+    <p class="note">Use the installer for your display size. These installers are for the original ESP32 CYD, not ESP32-S3 or other CYD variants. Flashing replaces the firmware currently on the device.</p>
     <p><a href="https://github.com/HB9IIU/ESP32-CYD-pocket-qo-100-spectrum-viewer">Source code and build instructions on GitHub</a>.</p>
   </main>
 </body>
