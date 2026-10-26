@@ -62,11 +62,9 @@ jobs:
               0x8000 ".pio/build/${profile}/partitions.bin" \
               0xe000 "$HOME/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin" \
               0x10000 ".pio/build/${profile}/firmware.bin"
-            jq --arg version "${GITHUB_SHA::7}" \
-              --arg profile "$profile" \
+            jq --arg profile "$profile" \
               --arg firmware "firmware-${suffix}.bin" \
               '.name = ("Pocket QO-100 Spectrum Viewer (" + $profile + ")")
-               | .version = $version
                | .builds[0].parts[0].path = $firmware' \
               webflasher/manifest.json > "_site/manifest-${suffix}.json"
           done

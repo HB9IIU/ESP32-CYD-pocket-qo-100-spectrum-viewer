@@ -1,6 +1,6 @@
 {
   "name": "Pocket QO-100 Spectrum Viewer",
-  "version": "1.0.0",
+  "version": "1.1",
   "builds": [
     {
       "chipFamily": "ESP32",

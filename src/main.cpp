@@ -31,7 +31,8 @@ const uint16_t FILL_CYAN = rgb(20, 65, 100);
 }
 
 // Branding, title, and status occupy the rows above the plot.
-constexpr int kTitleY = 11, kStatusY = 29, kPlotTop = 34, kPlotLeft = 6;
+// Top-aligned font 2 is 16 px high; font 1 is 8 px high.
+constexpr int kTitleY = 8, kStatusY = 24, kPlotTop = 34, kPlotLeft = 6;
 // Vertical scale of the spectrum trace (dBFS). Narrower span = more vertical
 // resolution. These are the start-up values; the scale then follows the signal.
 constexpr int kPlotMaxDbfs = -10, kPlotMinDbfs = -90;
@@ -163,6 +164,8 @@ static void buildRowGradient() {
 
 // ---- Auto-scale: detect a transmission plateau and put it near the plot top ----
 constexpr float kPlateauFraction = 0.95f;    // plateau height as share of the plot
+constexpr float kPeakFraction = 0.90f;       // reserve 10% of the plot above every peak
+constexpr uint32_t kPeakHoldMs = 2000;       // do not tighten between brief peak dips
 constexpr int kDetectMarginDb = 10;          // run must be this far above the floor
 constexpr int kDetectMinBins = 8;            // narrower runs (spikes) are ignored
 constexpr int kDetectFrames = 3;             // consecutive frames before locking
@@ -250,12 +253,32 @@ static void updateAutoScale(const uint8_t* values, int lo, int hi) {
     if (target < bottomTarget + kMinScaleSpanDb) target = bottomTarget + kMinScaleSpanDb;
 
     const float step = kScaleSlewDbPerSec * dt;
-    if (target > plotTopDbfs + step) plotTopDbfs += step;
-    else if (target < plotTopDbfs - step) plotTopDbfs -= step;
-    else plotTopDbfs = target;
     if (bottomTarget > plotBottomDbfs + step) plotBottomDbfs += step;
     else if (bottomTarget < plotBottomDbfs - step) plotBottomDbfs -= step;
     else plotBottomDbfs = bottomTarget;
+
+    // Protect the actual highest displayed bin, even when the detected run's
+    // median describes a broad shoulder rather than the narrow signal peak.
+    int peakCode = 0;
+    for (int i = lo; i <= hi; ++i) {
+        if (values[i] > peakCode) peakCode = values[i];
+    }
+    const float peakDb = -100.0f + peakCode * 100.0f / 255.0f;
+    static float heldPeakDb = -100.0f;
+    static uint32_t peakMs = 0;
+    if (peakDb >= heldPeakDb || now - peakMs >= kPeakHoldMs) {
+        heldPeakDb = peakDb;
+        peakMs = now;
+    }
+    const float safeTop = plotBottomDbfs + (heldPeakDb - plotBottomDbfs) / kPeakFraction;
+    if (target < safeTop) target = safeTop;
+    if (target < plotBottomDbfs + kMinScaleSpanDb) target = plotBottomDbfs + kMinScaleSpanDb;
+
+    // Expand immediately to prevent clipping; reclaim space slowly. The peak
+    // guard may exceed 0 dBFS because headroom is still needed for a 0 dBFS bin.
+    if (target > plotTopDbfs) plotTopDbfs = target;
+    else if (target < plotTopDbfs - step) plotTopDbfs -= step;
+    else plotTopDbfs = target;
 }
 
 static void updateTransmissionCenter(const uint8_t* values, int lo, int hi) {
@@ -454,7 +477,7 @@ static void drawFrame(const SpectrumFrame& frame) {
     static uint16_t lastStatusColor = 0;
     const uint16_t statusColor = frame.valid && !frame.clipped ? color::MID : color::ERROR;
     if (strcmp(status, lastStatus) || statusColor != lastStatusColor) {
-        tft.fillRect(0, kStatusY - 5, tft.width(), kPlotTop - kStatusY + 5, color::BG);
+        tft.fillRect(0, kStatusY, tft.width(), kPlotTop - kStatusY, color::BG);
         tft.setTextDatum(TC_DATUM);
         tft.setTextColor(statusColor, color::BG);
         tft.drawString(status, tft.width() / 2, kStatusY, 1);
